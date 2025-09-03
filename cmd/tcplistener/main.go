@@ -36,25 +36,25 @@ func main() {
 		lineChannel := getLinesChannel(conn)
 
 		for line := range lineChannel {
-			fmt.Printf("read: %s\n", line)
+			fmt.Printf("%s\n", line)
 		}
 
 		fmt.Printf("\n<- client disconnected\n\n")
 	}
 }
 
-func getLinesChannel(reader io.ReadCloser) <-chan string {
+func getLinesChannel(r io.ReadCloser) <-chan string {
 	buffer := make([]byte, bytesToRead) // only one param defaults capacity to that param
 	ch := make(chan string)
 
 	go func() {
 		defer close(ch)
-		defer reader.Close()
+		defer r.Close()
 
 		var currentLine string
 
 		for {
-			reader, err := reader.Read(buffer)
+			reader, err := r.Read(buffer)
 			if err != nil {
 				if currentLine != "" {
 					ch <- currentLine
