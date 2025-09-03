@@ -4,41 +4,57 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 )
 
 const (
-	textFile    = "messages.txt"
 	bytesToRead = 8
+	port        = ":42069"
 )
 
 func main() {
-	file, err := os.Open(textFile)
+	listener, err := net.Listen("tcp", port)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not open file: %v\n", err)
+		fmt.Fprintf(os.Stderr, "could not start server: %v\n", err)
 		return
 	}
+	defer listener.Close()
 
-	lineChannel := getLinesChannel(file)
+	fmt.Printf("starting server on... %v\n\n", listener.Addr())
 
-	for line := range lineChannel {
-		fmt.Printf("read: %s\n", line)
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error accepting connection: %v\n", err)
+			continue
+		}
+
+		fmt.Printf("-> addr %v has connected\n\n", conn.RemoteAddr())
+
+		lineChannel := getLinesChannel(conn)
+
+		for line := range lineChannel {
+			fmt.Printf("read: %s\n", line)
+		}
+
+		fmt.Printf("\n<- client disconnected\n\n")
 	}
 }
 
-func getLinesChannel(f io.ReadCloser) <-chan string {
+func getLinesChannel(reader io.ReadCloser) <-chan string {
 	buffer := make([]byte, bytesToRead) // only one param defaults capacity to that param
 	ch := make(chan string)
 
 	go func() {
 		defer close(ch)
-		defer f.Close()
+		defer reader.Close()
 
 		var currentLine string
 
 		for {
-			reader, err := f.Read(buffer)
+			reader, err := reader.Read(buffer)
 			if err != nil {
 				if currentLine != "" {
 					ch <- currentLine
