@@ -1,17 +1,14 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io"
+	"github.com/kiefbc/http-server-1.1/internal/request"
 	"net"
 	"os"
-	"strings"
 )
 
 const (
-	bytesToRead = 8
-	port        = ":42069"
+	port = ":42069"
 )
 
 func main() {
@@ -33,49 +30,21 @@ func main() {
 
 		fmt.Printf("-> addr %v has connected\n\n", conn.RemoteAddr())
 
-		lineChannel := getLinesChannel(conn)
-
-		for line := range lineChannel {
-			fmt.Printf("%s\n", line)
+		request, err := request.RequestFromReader(conn)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error reading request: %v\n", err)
+			conn.Close()
+			continue
 		}
 
+		fmt.Printf("-> received request: %+v\n\n", request)
+
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %v\n", request.RequestLine.Method)
+		fmt.Printf("- Target: %v\n", request.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %v\n", request.RequestLine.HttpVersion)
+
+		conn.Close()
 		fmt.Printf("\n<- client disconnected\n\n")
 	}
-}
-
-func getLinesChannel(r io.ReadCloser) <-chan string {
-	buffer := make([]byte, bytesToRead) // only one param defaults capacity to that param
-	ch := make(chan string)
-
-	go func() {
-		defer close(ch)
-		defer r.Close()
-
-		var currentLine string
-
-		for {
-			reader, err := r.Read(buffer)
-			if err != nil {
-				if currentLine != "" {
-					ch <- currentLine
-				}
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				fmt.Fprintf(os.Stderr, "Could not read file: %v\n", err)
-				break
-			}
-
-			currentLine += string(buffer[:reader])
-			parts := strings.Split(currentLine, "\n")
-
-			for i := 0; i < len(parts)-1; i++ {
-				ch <- parts[i]
-			}
-
-			currentLine = parts[len(parts)-1]
-		}
-	}()
-
-	return ch
 }
