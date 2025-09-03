@@ -5,18 +5,22 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/kiefbc/http-server-1.1/internal/headers"
 )
 
 type stateStatus int
 
 const (
 	initialized stateStatus = iota
+	parsingHeaders
 	done
 )
 const bufferSize = 8
 
 type Request struct {
 	RequestLine RequestLine
+	Headers     headers.Headers
 	state       stateStatus
 }
 
@@ -26,12 +30,15 @@ type RequestLine struct {
 	Method        string
 }
 
+// RequestFromReader parses an HTTP request from the given io.Reader using streaming buffer management.
+// It reads data in chunks, expanding the buffer as needed, and returns a parsed Request.
 func RequestFromReader(r io.Reader) (*Request, error) {
 	buffer := make([]byte, bufferSize)
 	readToIndex := 0
 
 	request := Request{
-		state: initialized,
+		Headers: headers.NewHeaders(),
+		state:   initialized,
 	}
 
 	for request.state != done {
@@ -65,19 +72,24 @@ func RequestFromReader(r io.Reader) (*Request, error) {
 	return &request, nil
 }
 
+// parseRequestLine parses the HTTP request line from the given data bytes.
+// Returns the parsed RequestLine, number of bytes consumed, and any error encountered.
 func parseRequestLine(data []byte) (RequestLine, int, error) {
+	// Look for CRLF line terminator (RFC 9112 Section 2.2)
 	crlfIndex := strings.Index(string(data), "\r\n")
 	if crlfIndex == -1 {
 		// No \r\n found, need more data
 		return RequestLine{}, 0, nil
 	}
 
+	// Parse request-line: method SP request-target SP HTTP-version (RFC 9112 Section 3)
 	line := string(data[:crlfIndex])
 	parsed := strings.Split(line, " ")
 	if len(parsed) != 3 {
 		return RequestLine{}, 0, fmt.Errorf("invalid request line format: expected 3 parts, got %d", len(parsed))
 	}
 
+	// Validate HTTP method format (RFC 9110 Section 9)
 	method := parsed[0] // GET or POST
 	if method != strings.ToUpper(method) {
 		return RequestLine{}, 0, fmt.Errorf("invalid http method")
@@ -85,6 +97,7 @@ func parseRequestLine(data []byte) (RequestLine, int, error) {
 
 	requestTarget := parsed[1] // /somewhere
 
+	// Validate HTTP version format and support (RFC 9112 Section 3)
 	httpVersion := parsed[2] // HTTP/1.1
 	httpVersionParts := strings.Split(httpVersion, "/")
 	if len(httpVersionParts) != 2 {
@@ -106,7 +119,26 @@ func parseRequestLine(data []byte) (RequestLine, int, error) {
 	return requestLine, crlfIndex + 2, nil
 }
 
+// parse processes the given data bytes, potentially in multiple steps, until the request is fully parsed or more data is needed.
+// Returns the total number of bytes consumed and any error encountered.
 func (r *Request) parse(data []byte) (int, error) {
+	totalBytesParsed := 0
+	for r.state != done {
+		n, err := r.parseSingle(data[totalBytesParsed:])
+		if err != nil {
+			return totalBytesParsed, err
+		}
+		if n == 0 {
+			break // need more data
+		}
+		totalBytesParsed += n
+	}
+	return totalBytesParsed, nil
+}
+
+// parseSingle processes a single step of parsing based on the current state.
+// It returns the number of bytes consumed in this step and any error encountered.
+func (r *Request) parseSingle(data []byte) (int, error) {
 	switch r.state {
 	case initialized:
 		requestLine, bytesRead, err := parseRequestLine(data)
@@ -118,7 +150,19 @@ func (r *Request) parse(data []byte) (int, error) {
 		}
 
 		r.RequestLine = requestLine
-		r.state = done
+		r.state = parsingHeaders
+		return bytesRead, nil
+	case parsingHeaders:
+		bytesRead, headersDone, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, fmt.Errorf("error parsing headers: %v", err)
+		}
+		if bytesRead == 0 {
+			return 0, nil // need more data
+		}
+		if headersDone {
+			r.state = done
+		}
 		return bytesRead, nil
 	case done:
 		return 0, fmt.Errorf("trying to read data in a done state")
