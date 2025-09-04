@@ -70,12 +70,20 @@ func (h Headers) Set(key, value string) {
 	}
 }
 
+func (h Headers) Get(key string) (value string, ok bool) {
+	loweredKey := strings.ToLower(key)
+	if val, exists := h[loweredKey]; exists {
+		return val, true
+	}
+
+	return "", false
+}
+
 // validationToken checks if the header key contains only valid ASCII characters.
 func validationToken(key string) bool {
 	// Validate header key contains only ASCII characters (RFC 9110 Section 5.1)
 	for _, char := range key {
 		if char > 127 {
-			/* eturn 0, false, fmt.Errorf("invalid header key: non-ASCII character found") */
 			return false
 		}
 	}

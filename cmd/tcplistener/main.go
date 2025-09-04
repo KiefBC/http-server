@@ -47,6 +47,8 @@ func main() {
 		for k, v := range request.Headers {
 			fmt.Printf("- %v: %v\n", k, v)
 		}
+		fmt.Println("Body:")
+		fmt.Printf("%v\n", string(request.Body))
 
 		conn.Close()
 		fmt.Printf("\n<- client disconnected\n\n")

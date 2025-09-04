@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/kiefbc/http-server-1.1/internal/headers"
@@ -14,6 +15,7 @@ type stateStatus int
 const (
 	initialized stateStatus = iota
 	parsingHeaders
+	parsingBody
 	done
 )
 const bufferSize = 8
@@ -22,6 +24,8 @@ type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
 	state       stateStatus
+	Body        []byte
+	bodyLength  int
 }
 
 type RequestLine struct {
@@ -39,6 +43,7 @@ func RequestFromReader(r io.Reader) (*Request, error) {
 	request := Request{
 		Headers: headers.NewHeaders(),
 		state:   initialized,
+		Body:    make([]byte, 0),
 	}
 
 	for request.state != done {
@@ -52,6 +57,15 @@ func RequestFromReader(r io.Reader) (*Request, error) {
 		bytesRead, err := r.Read(buffer[readToIndex:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				// Check if we're in the middle of parsing a body with Content-Length
+				if request.state == parsingBody {
+					if contentLengthStr, exists := request.Headers.Get("Content-Length"); exists {
+						contentLength, parseErr := strconv.ParseInt(contentLengthStr, 10, 64)
+						if parseErr == nil && int64(len(request.Body)) < contentLength {
+							return &Request{}, fmt.Errorf("incomplete body: expected %d bytes, got %d", contentLength, len(request.Body))
+						}
+					}
+				}
 				request.state = done
 				break
 			}
@@ -161,9 +175,39 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, nil // need more data
 		}
 		if headersDone {
-			r.state = done
+			r.state = parsingBody
 		}
 		return bytesRead, nil
+	case parsingBody:
+		if contentLengthStr, exists := r.Headers.Get("Content-Length"); exists {
+			contentLength, err := strconv.ParseInt(contentLengthStr, 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("invalid Content-Length: %v", err)
+			}
+
+			// r.Body = append(r.Body, data...)
+			// r.bodyLength += len(data)
+
+			// Only take the exact amount of bytes needed for the body
+			bytesNeeded := contentLength - int64(len(r.Body))
+			bytesToTake := min(int64(len(data)), bytesNeeded)
+			r.Body = append(r.Body, data[:bytesToTake]...)
+
+			// if int64(r.bodyLength) > contentLength {
+			//	return 0, fmt.Errorf("Content-Length too large")
+			// }
+
+			if int64(len(r.Body)) == contentLength {
+				r.state = done
+			}
+
+			// return len(data), nil
+			return int(bytesToTake), nil // Return only what we consumed
+		} else {
+			r.state = done
+			return len(data), nil
+		}
+
 	case done:
 		return 0, fmt.Errorf("trying to read data in a done state")
 	default:
