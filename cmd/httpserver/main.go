@@ -20,6 +20,24 @@ const port = 42069
 
 func handler(w *response.Writer, req *request.Request) *server.HandlerError {
 	switch req.RequestLine.RequestTarget {
+	case "/video":
+		videoFile, err := os.ReadFile("assets/vim.mp4")
+		if err != nil {
+			return &server.HandlerError{
+				StatusCode: 500,
+				Message:    fmt.Sprintf("Failed to read video file: %v", err),
+			}
+		}
+
+		responseHeaders := response.GetDefaultHeaders(len(videoFile))
+		responseHeaders.Replace("content-type", "video/mp4")
+		responseHeaders.Replace("content-length", fmt.Sprintf("%d", len(videoFile)))
+
+		w.WriteStatusLine(response.StatusOK)
+		w.WriteHeaders(responseHeaders)
+		w.WriteBody(videoFile)
+
+		return nil
 	case "/yourproblem":
 		htmlContent := []byte(`<html>
   <head>
