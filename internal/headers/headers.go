@@ -70,6 +70,14 @@ func (h Headers) Set(key, value string) {
 	}
 }
 
+// Replace sets a header field with the given key and value, replacing any existing value.
+// Unlike Set, this does not append to existing values but completely replaces them.
+func (h Headers) Replace(key, value string) {
+	// Field names are case-insensitive (RFC 9110 Section 5.1)
+	lowerKey := strings.ToLower(key)
+	h[lowerKey] = value
+}
+
 // Get retrieves the value of a header field by key.
 // Header field names are case-insensitive per RFC 9110 Section 5.1.
 func (h Headers) Get(key string) (value string, ok bool) {

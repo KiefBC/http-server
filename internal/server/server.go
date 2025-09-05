@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net"
 	"sync/atomic"
 
@@ -22,16 +20,17 @@ type HandlerError struct {
 	Message    string
 }
 
-type Handler func(w io.Writer, req *request.Request) *HandlerError
+type Handler func(w *response.Writer, req *request.Request) *HandlerError
 
-// Write writes a complete HTTP error response to the provided writer.
+// Write writes a complete HTTP error response using the response.Writer.
 // This includes the status line, headers, and message body formatted per RFC 9112.
-func (he *HandlerError) Write(w io.Writer) {
-	response.WriteStatusLine(w, he.StatusCode)
+func (he *HandlerError) Write(w *response.Writer) {
 	messageBytes := []byte(he.Message)
 	headers := response.GetDefaultHeaders(len(messageBytes))
-	response.WriteHeaders(w, headers)
-	w.Write(messageBytes)
+
+	w.WriteStatusLine(he.StatusCode)
+	w.WriteHeaders(headers)
+	w.WriteBody(messageBytes)
 }
 
 // Serve creates a new HTTP server listening on the specified port and starts accepting connections.
@@ -77,34 +76,29 @@ func (s *Server) listen() {
 }
 
 // handle processes a single HTTP connection by parsing the request and calling the provided handler.
-// If the handler returns an error, it writes the error response.
+// The handler now has full control over the HTTP response via the response.Writer.
 // The response includes a status line with headers per RFC 9112 Section 3.
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
 	req, err := request.RequestFromReader(conn)
 	if err != nil {
+		responseWriter := response.NewWriter(conn)
 		handlerErr := &HandlerError{
 			StatusCode: 400,
 			Message:    fmt.Sprintf("Bad Request: %v", err),
 		}
 
-		handlerErr.Write(conn)
+		handlerErr.Write(responseWriter)
 		return
 	}
 
-	buffer := bytes.NewBuffer([]byte{})
-	handlerErr := s.handler(buffer, req)
+	responseWriter := response.NewWriter(conn)
+	handlerErr := s.handler(responseWriter, req)
 	if handlerErr != nil {
-		handlerErr.Write(conn)
+		handlerErr.Write(responseWriter)
 		return
 	}
-
-	responseBody := buffer.Bytes()
-	response.WriteStatusLine(conn, response.StatusOK)
-	headers := response.GetDefaultHeaders(len(responseBody))
-	response.WriteHeaders(conn, headers)
-	conn.Write(responseBody)
 
 	// Give the client time to read the full response before closing
 	// This prevents "connection reset by peer" errors
