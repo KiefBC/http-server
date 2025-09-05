@@ -10,6 +10,7 @@ import (
 
 const port = 42069
 
+// main starts an HTTP server that listens on port 42069 and handles graceful shutdown.
 func main() {
 	server, err := server.Serve(port)
 	if err != nil {

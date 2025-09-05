@@ -11,6 +11,7 @@ const (
 	address = "localhost:42069"
 )
 
+// main creates a UDP client that forwards stdin input to a UDP server.
 func main() {
 	serverAddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {

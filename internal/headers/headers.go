@@ -70,6 +70,8 @@ func (h Headers) Set(key, value string) {
 	}
 }
 
+// Get retrieves the value of a header field by key.
+// Header field names are case-insensitive per RFC 9110 Section 5.1.
 func (h Headers) Get(key string) (value string, ok bool) {
 	loweredKey := strings.ToLower(key)
 	if val, exists := h[loweredKey]; exists {

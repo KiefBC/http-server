@@ -11,6 +11,7 @@ const (
 	port = ":42069"
 )
 
+// main starts a TCP server that parses HTTP requests and logs their details.
 func main() {
 	listener, err := net.Listen("tcp", port)
 	if err != nil {
