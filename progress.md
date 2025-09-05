@@ -121,3 +121,27 @@ Introduced response helpers and a concurrent TCP server that returns 200 OK with
 1. Introduced response helpers to write HTTP/1.1 status lines and default headers.
 2. Implemented `internal/server` to accept TCP connections and return `200 OK` with headers (no body), then close the write side to avoid resets.
 3. Added `cmd/httpserver` with graceful shutdown on SIGINT/SIGTERM, separate from the raw TCP listener.
+
+## Phase 7 - Chunked Encoding & Trailers
+
+### Summary
+
+Implemented HTTP/1.1 chunked transfer encoding with a response writer that streams chunks, plus optional trailer headers. Added demo endpoints for chunked output and proxy streaming.
+
+### Merge/Commit
+
+- Merge: `7d19489` (chunked encoding)
+
+### Resources
+
+[RFC 9112 §7.1](https://datatracker.ietf.org/doc/html/rfc9112#section-7.1) (Transfer-Encoding: chunked)  
+[RFC 9112 §7.1.2](https://datatracker.ietf.org/doc/html/rfc9112#section-7.1.2) (Trailer fields)  
+[RFC 9112 §7.1.3](https://datatracker.ietf.org/doc/html/rfc9112#section-7.1.3) (Last chunk and message completion)
+
+### Steps
+
+1. Added `internal/response/writer.go` with `WriteChunkedBody`, `WriteChunkedBodyDone`, `WriteTrailers`, and `WriteTrailersDone`, enforcing correct write order via an internal state machine.
+2. Added `internal/response/headers.go` with `GetChunkedHeaders()` to set `Transfer-Encoding: chunked` (and omit `Content-Length`).
+3. Implemented `/chunked` endpoint to stream multiple HTML chunks in a single response.
+4. Implemented `/httpbin/<path>` proxy that streams upstream content as chunked, preserves `Content-Type`, sets `Trailer: X-Content-SHA256, X-Content-Length`, and computes trailer values after streaming.
+5. Updated server handler integration to use the new writer API; ensured proper termination with final chunk and optional trailers.
