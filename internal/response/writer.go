@@ -17,6 +17,7 @@ const (
 	stateBodyWritten
 	stateChunkedWriting
 	stateChunkedDone
+	stateTrailersWritten
 )
 
 type StatusCode int
@@ -141,17 +142,51 @@ func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
 }
 
 // WriteChunkedBodyDone writes the final chunk terminator for chunked encoding.
-// Writes "0\r\n\r\n" to signal end of chunked response per RFC 9112 Section 7.1.3.
-// Must be called after WriteChunkedBody to properly terminate the response.
+// Writes "0\r\n" to signal end of chunked response per RFC 9112 Section 7.1.3.
+// Must be called after WriteChunkedBody. Use WriteTrailers() for trailer headers before final CRLF.
 func (w *Writer) WriteChunkedBodyDone() (int, error) {
 	if w.state != stateChunkedWriting {
 		return 0, fmt.Errorf("WriteChunkedBodyDone called out of order - must be called after WriteChunkedBody")
 	}
 
-	// Write final chunk: size 0 + CRLF + CRLF (no trailing headers)
-	n, err := fmt.Fprintf(w.writer, "0\r\n\r\n")
+	// Write final chunk: size 0 + CRLF (trailers can follow before final CRLF)
+	n, err := fmt.Fprintf(w.writer, "0\r\n")
 	if err == nil {
 		w.state = stateChunkedDone
 	}
 	return n, err
+}
+
+// WriteTrailers writes HTTP trailer headers after chunked body completion.
+// Must be called after WriteChunkedBodyDone and before WriteTrailersDone.
+// Trailers are optional metadata headers that follow the final chunk per RFC 9112 Section 7.1.2.
+func (w *Writer) WriteTrailers(h headers.Headers) error {
+	if w.state != stateChunkedDone {
+		return fmt.Errorf("WriteTrailers called out of order - must be called after WriteChunkedBodyDone")
+	}
+
+	for key, value := range h {
+		_, err := fmt.Fprintf(w.writer, "%s: %s\r\n", key, value)
+		if err != nil {
+			return fmt.Errorf("error writing trailers: %v", err)
+		}
+	}
+
+	w.state = stateTrailersWritten
+	return nil
+}
+
+// WriteTrailersDone writes the final CRLF to complete a chunked response with trailers.
+// Must be called after WriteTrailers to properly terminate the HTTP response.
+func (w *Writer) WriteTrailersDone() error {
+	if w.state != stateTrailersWritten && w.state != stateChunkedDone {
+		return fmt.Errorf("WriteTrailersDone called out of order - must be called after WriteTrailers or WriteChunkedBodyDone")
+	}
+
+	_, err := fmt.Fprintf(w.writer, "\r\n")
+	if err != nil {
+		return fmt.Errorf("error writing trailers ending: %v", err)
+	}
+
+	return nil
 }

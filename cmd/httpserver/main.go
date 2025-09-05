@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/kiefbc/http-server-1.1/internal/headers"
 	"github.com/kiefbc/http-server-1.1/internal/request"
 	"github.com/kiefbc/http-server-1.1/internal/response"
 	"github.com/kiefbc/http-server-1.1/internal/server"
@@ -113,14 +115,18 @@ func handler(w *response.Writer, req *request.Request) *server.HandlerError {
 				chunkedHeaders.Replace("content-type", contentType)
 			}
 
+			chunkedHeaders.Set("trailer", "X-Content-SHA256, X-Content-Length")
+
 			w.WriteStatusLine(response.StatusCode(resp.StatusCode))
 			w.WriteHeaders(chunkedHeaders)
 
+			var fullBody []byte
 			buffer := make([]byte, 8)
 			for {
 				n, err := resp.Body.Read(buffer)
 				if n > 0 {
 					fmt.Printf("Read %d bytes, writing chunk\n", n)
+					fullBody = append(fullBody, buffer[:n]...)
 					w.WriteChunkedBody(buffer[:n])
 				}
 				if err != nil {
@@ -128,7 +134,16 @@ func handler(w *response.Writer, req *request.Request) *server.HandlerError {
 				}
 			}
 
+			hash := sha256.Sum256(fullBody)
+
 			w.WriteChunkedBodyDone()
+
+			trailerHeaders := make(headers.Headers)
+			trailerHeaders.Replace("x-content-sha256", fmt.Sprintf("%x", hash))
+			trailerHeaders.Replace("x-content-length", fmt.Sprintf("%d", len(fullBody)))
+			w.WriteTrailers(trailerHeaders)
+			w.WriteTrailersDone()
+
 			fmt.Println("Proxy streaming completed")
 
 			return nil
