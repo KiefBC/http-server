@@ -15,6 +15,8 @@ const (
 	stateStatusWritten
 	stateHeadersWritten
 	stateBodyWritten
+	stateChunkedWriting
+	stateChunkedDone
 )
 
 type StatusCode int
@@ -22,6 +24,9 @@ type StatusCode int
 const (
 	StatusOK                  StatusCode = 200
 	StatusBadRequest          StatusCode = 400
+	StatusNotFound            StatusCode = 404
+	StatusForbidden           StatusCode = 403
+	StatusMethodNotAllowed    StatusCode = 405
 	StatusInternalServerError StatusCode = 500
 )
 
@@ -100,6 +105,53 @@ func (w *Writer) WriteBody(p []byte) (int, error) {
 	n, err := w.writer.Write(p)
 	if err == nil {
 		w.state = stateBodyWritten
+	}
+	return n, err
+}
+
+// WriteChunkedBody writes data as a chunked transfer encoding chunk.
+// Must be called after WriteHeaders. Format: [hex-size]\r\n[data]\r\n
+// Each call writes one complete chunk. Use WriteChunkedBodyDone() to finish.
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	if w.state != stateHeadersWritten && w.state != stateChunkedWriting {
+		return 0, fmt.Errorf("WriteChunkedBody called out of order - must be called after WriteHeaders")
+	}
+
+	// Write chunk size in hexadecimal + CRLF
+	chunkSize := len(p)
+	_, err := fmt.Fprintf(w.writer, "%x\r\n", chunkSize)
+	if err != nil {
+		return 0, err
+	}
+
+	// Write chunk data
+	n, err := w.writer.Write(p)
+	if err != nil {
+		return n, err
+	}
+
+	// Write trailing CRLF after chunk data
+	_, err = fmt.Fprintf(w.writer, "\r\n")
+	if err != nil {
+		return n, err
+	}
+
+	w.state = stateChunkedWriting
+	return n, nil
+}
+
+// WriteChunkedBodyDone writes the final chunk terminator for chunked encoding.
+// Writes "0\r\n\r\n" to signal end of chunked response per RFC 9112 Section 7.1.3.
+// Must be called after WriteChunkedBody to properly terminate the response.
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	if w.state != stateChunkedWriting {
+		return 0, fmt.Errorf("WriteChunkedBodyDone called out of order - must be called after WriteChunkedBody")
+	}
+
+	// Write final chunk: size 0 + CRLF + CRLF (no trailing headers)
+	n, err := fmt.Fprintf(w.writer, "0\r\n\r\n")
+	if err == nil {
+		w.state = stateChunkedDone
 	}
 	return n, err
 }

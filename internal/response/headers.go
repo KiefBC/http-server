@@ -20,6 +20,20 @@ func GetDefaultHeaders(contentLen int) headers.Headers {
 	return headers
 }
 
+// GetChunkedHeaders creates headers for chunked transfer encoding responses.
+// Sets Transfer-Encoding: chunked and omits Content-Length per RFC 9112 Section 7.1.
+// Content-Length and Transfer-Encoding are mutually exclusive.
+func GetChunkedHeaders() headers.Headers {
+	headers := headers.NewHeaders()
+	// Transfer-Encoding header for chunked responses (RFC 9112 Section 7.1)
+	headers.Set("transfer-encoding", "chunked")
+	// Connection header (RFC 9110 Section 7.6.1)
+	headers.Set("connection", "close")
+	// Content-Type header (RFC 9110 Section 8.3)
+	headers.Set("content-type", "text/plain")
+	return headers
+}
+
 // WriteHeaders writes HTTP header fields to the provided writer.
 // Each header follows RFC 9112 Section 3.2 format: field-name ":" field-value CRLF
 func WriteHeaders(w io.Writer, headers headers.Headers) error {

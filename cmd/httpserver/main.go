@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/kiefbc/http-server-1.1/internal/request"
@@ -14,10 +16,6 @@ import (
 
 const port = 42069
 
-// handler demonstrates the new response.Writer capabilities:
-// 1. Writing raw []byte HTML content for all responses
-// 2. Setting custom Content-Type headers to text/html
-// 3. Proper order validation with WriteStatusLine -> WriteHeaders -> WriteBody
 func handler(w *response.Writer, req *request.Request) *server.HandlerError {
 	switch req.RequestLine.RequestTarget {
 	case "/yourproblem":
@@ -62,7 +60,81 @@ func handler(w *response.Writer, req *request.Request) *server.HandlerError {
 
 		return nil
 
+	case "/chunked":
+		chunkedHeaders := response.GetChunkedHeaders()
+		chunkedHeaders.Replace("content-type", "text/html")
+
+		w.WriteStatusLine(response.StatusOK)
+		w.WriteHeaders(chunkedHeaders)
+
+		chunk1 := []byte(`<html>
+  <head>
+    <title>Chunked Response</title>
+  </head>
+  <body>`)
+
+		chunk2 := []byte(`    <h1>Get Chunk'd!</h1>
+    <p>This content is being sent in chunks!</p>`)
+
+		chunk3 := []byte(`    <p>Each chunk gets a hex size prefix.</p>
+    <p>Perfect for streaming data!</p>
+  </body>
+</html>`)
+
+		w.WriteChunkedBody(chunk1)
+		w.WriteChunkedBody(chunk2)
+		w.WriteChunkedBody(chunk3)
+
+		w.WriteChunkedBodyDone()
+
+		return nil
+
 	default:
+		// Check if this is a /httpbin proxy request
+		if after, ok := strings.CutPrefix(req.RequestLine.RequestTarget, "/httpbin/"); ok {
+			// Extract the path after /httpbin/ to proxy to httpbin.org
+			proxyPath := after
+			proxyURL := fmt.Sprintf("https://httpbin.org/%s", proxyPath)
+
+			fmt.Printf("Proxying request to: %s\n", proxyURL)
+
+			resp, err := http.Get(proxyURL)
+			if err != nil {
+				return &server.HandlerError{
+					StatusCode: 500,
+					Message:    fmt.Sprintf("Proxy request failed: %v", err),
+				}
+			}
+			defer resp.Body.Close()
+
+			chunkedHeaders := response.GetChunkedHeaders()
+			// Copy content-type from upstream response if present
+			if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+				chunkedHeaders.Replace("content-type", contentType)
+			}
+
+			w.WriteStatusLine(response.StatusCode(resp.StatusCode))
+			w.WriteHeaders(chunkedHeaders)
+
+			buffer := make([]byte, 8)
+			for {
+				n, err := resp.Body.Read(buffer)
+				if n > 0 {
+					fmt.Printf("Read %d bytes, writing chunk\n", n)
+					w.WriteChunkedBody(buffer[:n])
+				}
+				if err != nil {
+					break
+				}
+			}
+
+			w.WriteChunkedBodyDone()
+			fmt.Println("Proxy streaming completed")
+
+			return nil
+		}
+
+		// Default non-proxy response
 		htmlContent := []byte(`<html>
   <head>
     <title>200 OK</title>
